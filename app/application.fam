@@ -1,0 +1,12 @@
+App(
+    appid="coyote",
+    name="Flipper Coyote",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="coyote_app",
+    requires=["gui", "storage"],
+    stack_size=6 * 1024,
+    fap_category="Bluetooth",
+    fap_version="1.0",
+    fap_description="Control a DG-Lab Coyote v2 over BLE",
+    fap_author="KinkyTechieKitty",
+)

@@ -1,0 +1,14 @@
+#!/bin/sh
+# Refuse to commit the DG-Lab presets. They carry a non-commercial restriction
+# that cannot be reconciled with this repo's GPL-3.0 (see README "Licensing"),
+# and a local --with-dglab build rewrites the same generated files that are
+# tracked here, so committing them is an easy accident to make.
+if git diff --cached --name-only | grep -qE '^app/waveforms(_generated\.h|\.c)$'; then
+    if git diff --cached -U0 -- app/waveforms.c app/waveforms_generated.h |
+       grep -qiE '^\+.*(_dg\b|_DG\[|COYOTE_WAVEFORM_COUNT 45)'; then
+        echo "pre-commit: refusing to commit DG-Lab waveform data." >&2
+        echo "  Regenerate without them first:  python3 tools/gen_waveforms.py" >&2
+        echo "  Then rebuild locally with:      python3 tools/gen_waveforms.py --with-dglab" >&2
+        exit 1
+    fi
+fi
