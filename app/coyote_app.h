@@ -21,7 +21,6 @@
 // meant 207 presses to walk a cap from 85 to 292 with a step of 1.
 #define COYOTE_CAP_STEP 5u
 #define COYOTE_MODE_COUNT 2u // [0] = normal, [1] = fire
-#define COYOTE_SETTINGS_PATH "/ext/apps_data/coyote/settings.bin"
 
 typedef enum {
     COYOTE_CHANNEL_A = 0,

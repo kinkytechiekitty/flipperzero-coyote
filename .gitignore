@@ -1,3 +1,4 @@
-# Built artifact; rebuild with Blue++'s build.sh (see README)
+# Built artifacts; rebuild with tools/build.sh (see README)
 coyote.fap
+coyote-with-dg.fap
 .DS_Store

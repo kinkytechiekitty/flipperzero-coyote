@@ -46,16 +46,22 @@ cc -std=c11 -Wall -Wextra -Werror -pedantic -Iapp \
 # Regenerate the committed 21-waveform table
 python3 tools/gen_waveforms.py /path/to/feeder/server/lib/coyote-sequences.js
 
-# Build the .fap (needs a Blue++ checkout that has had one full ./build.sh)
-cp -r app "$BLUEPP/coyote" && add `coyote` to APPS in "$BLUEPP/build.sh"
-cd "$BLUEPP" && BLE_API=hci,gap,gatt ./build.sh fap
+# Build (needs a Blue++ checkout that has had one full ./build.sh).
+# BLUEPP defaults to ~/flipper-bluepp; SEQUENCES overrides the generator source.
+tools/build.sh                # -> coyote.fap          (21 waveforms)
+tools/build.sh --with-dglab   # -> coyote-with-dg.fap  (45, local only)
 ```
 
-A full `./build.sh` in Blue++ takes 5–15 minutes; `./build.sh fap` rebuilds only
-the apps. To iterate on just this app without re-running Blue++'s patch script,
-stage it into `flipperzero-firmware/applications_user/coyote/` and run
-`./fbt -j4 COMPACT=1 DEBUG=0 COPRO_STACK_TYPE=ble_full \
-COPRO_STACK_BIN=stm32wb5x_BLE_Stack_full_fw.bin fap_coyote`.
+`tools/build.sh` regenerates the table, stages the app plus Blue++'s `libble/`
+into `applications_user/`, builds that one fap with `./fbt`, copies it to the
+repo root, and **regenerates the 21-waveform table again on the way out** — so
+whatever was built, the working tree ends up matching what is committed. The DG
+variant builds under appid `coyote_dg` so both can be installed on the Flipper
+at once, and reads `settings-dg.bin` rather than the normal build's
+`settings.bin` (the masks are incompatible; see below).
+
+Blue++'s own `BLE_API=hci,gap,gatt ./build.sh fap` still works if you add
+`coyote` to its `APPS` array, and builds every app.
 
 ## Things that will bite you
 
@@ -65,9 +71,16 @@ COPRO_STACK_BIN=stm32wb5x_BLE_Stack_full_fw.bin fap_coyote`.
   21 to 45. Their licence cannot be reconciled with this repo's GPL-3.0 (README
   "Licensing"). `.githooks/pre-commit` refuses such a commit; enable it with
   `git config core.hooksPath .githooks`. If you find the working tree carrying
-  45 waveforms, that is the owner's local build, not a change to commit.
-- **The published `.fap` must be a 21-waveform build.** Check with
+  45 waveforms, that is the owner's local build, not a change to commit —
+  `tools/build.sh` normally leaves it on 21, so a 45 tree means a bare
+  `gen_waveforms.py --with-dglab` ran.
+- **Only `coyote.fap` is publishable.** `coyote-with-dg.fap` carries the presets
+  and is local-only; both are gitignored. Check the release asset with
   `strings -a coyote.fap | grep -c ' DG'` — it must be 0.
+- **The two builds' settings files are not interchangeable.** A 45-waveform
+  build's masks set bits above 21, which `coyote_settings_validate()` rejects,
+  so the DG build uses `settings-dg.bin` (`#ifdef COYOTE_WITH_DGLAB`, emitted
+  into `waveforms_generated.h` by the generator). Don't collapse them.
 - **Waveform masks are `uint64_t`** precisely so a 45-waveform local build
   works; `1u << 45` is undefined behaviour, so never narrow them back.
 - **The settings file is versioned** (`SETTINGS_SIZE`, magic + version byte at

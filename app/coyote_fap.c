@@ -21,7 +21,14 @@
 
 #define TAG "Coyote"
 #define VIEW_MAIN 0u
+// A --with-dglab build stores its settings separately: its waveform masks set
+// bits the 21-waveform build rejects, so one shared file would reset whichever
+// build opened it second. See README "Adding the DG-Lab presets yourself".
+#ifdef COYOTE_WITH_DGLAB
+#define SETTINGS_PATH EXT_PATH("apps_data/coyote/settings-dg.bin")
+#else
 #define SETTINGS_PATH EXT_PATH("apps_data/coyote/settings.bin")
+#endif
 // v6: magic(4) ver(1) step(1) vibro(1) buzz(1) normal(8) fire(8) caps(4)
 //     auto_advance(2) shuffle(2) = 32. The per-BLE-address device records of
 //     v3-v5 are gone; v5 files are migrated by taking slot 0's caps.

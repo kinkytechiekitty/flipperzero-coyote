@@ -107,5 +107,10 @@ header = [
     f"#define COYOTE_WAVEFORM_COUNT {len(seqs)}",
     "",
 ]
+# A DG-Lab build keeps its own settings file: its waveform masks set bits the
+# 21-waveform build rejects in coyote_settings_validate(), so sharing one file
+# would silently reset whichever build opened it second.
+if WITH_DGLAB:
+    header += ["#define COYOTE_WITH_DGLAB 1", ""]
 open(os.path.join(HERE, "..", "app", "waveforms_generated.h"), "w").write("\n".join(header))
 print(f"{len(seqs)} waveforms written ({'with' if WITH_DGLAB else 'without'} DG-Lab presets)")

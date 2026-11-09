@@ -1,6 +1,6 @@
 # Flipper Coyote
 
-[![CI](https://github.com/KinkyTechieKitty/flipper-coyote/actions/workflows/ci.yml/badge.svg)](https://github.com/KinkyTechieKitty/flipper-coyote/actions/workflows/ci.yml)
+[![CI](https://github.com/KinkyTechieKitty/flipperzero-coyote/actions/workflows/ci.yml/badge.svg)](https://github.com/KinkyTechieKitty/flipperzero-coyote/actions/workflows/ci.yml)
 
 A Flipper Zero app that drives a **DG-Lab Coyote v2** electrostim unit directly
 over Bluetooth LE — no phone, no computer, no server. Two channels, 21
@@ -92,28 +92,19 @@ The app needs Blue++'s full BLE central stack and its exported ST GAP/GATT
 symbols; it will not build or load against stock firmware.
 
 1. Clone [Flipper Blue++](https://github.com/andydixon/flipper-bluepp) and run
-   `./build.sh` once (first build takes 5–15 minutes and fetches its own
-   toolchain).
-2. Copy this project's `app/` directory into the Blue++ checkout as `coyote/`,
-   and add `coyote` to the `APPS` array in Blue++'s `build.sh`.
-3. `BLE_API=hci,gap,gatt ./build.sh fap`
+   `./build.sh` once (5–15 minutes; it fetches its own ARM toolchain).
+2. `tools/build.sh` → `coyote.fap` in the repo root.
 
-The result is `flipperzero-firmware/build/f7-firmware-C/.extapps/coyote.fap`,
-and the full `./build.sh` also puts it inside the firmware update package.
+Set `BLUEPP` if the checkout is not at `~/flipper-bluepp`, and `SEQUENCES` if
+Feeder's `coyote-sequences.js` is not where `tools/gen_waveforms.py` expects it.
 
-`ble_central.c` is **not** in this repo: Blue++'s staging step copies
-`libble/*.c` into any app that includes `ble_central.h`, so the BLE layer comes
-from your own checkout. To skip Blue++'s `build.sh` and iterate with `./fbt`
-directly, stage the app by hand and bring that layer with it:
-
-```sh
-cp -r app "$BLUEPP"/flipperzero-firmware/applications_user/coyote
-cp "$BLUEPP"/libble/*.c "$BLUEPP"/libble/*.h \
-   "$BLUEPP"/flipperzero-firmware/applications_user/coyote/
-cd "$BLUEPP"/flipperzero-firmware && ./fbt -j4 COMPACT=1 DEBUG=0 \
-  COPRO_STACK_TYPE=ble_full \
-  COPRO_STACK_BIN=stm32wb5x_BLE_Stack_full_fw.bin fap_coyote
-```
+`ble_central.c` is **not** in this repo — the BLE layer is copied out of your
+Blue++ checkout at build time, which is what the script does for you. To build
+through Blue++'s own `build.sh` instead, copy `app/` into the checkout as
+`coyote/`, add `coyote` to its `APPS` array, and run
+`BLE_API=hci,gap,gatt ./build.sh fap`; the `.fap` lands in
+`flipperzero-firmware/build/f7-firmware-C/.extapps/` and inside the firmware
+update package.
 
 ### Host checks
 
@@ -150,12 +141,20 @@ repo** for licensing reasons (below), but nothing stops you adding them to your
 own build:
 
 ```sh
-python3 tools/gen_waveforms.py --with-dglab   # needs them in the source file
+tools/build.sh --with-dglab   # -> coyote-with-dg.fap
 ```
 
-That expects the 24 sequences under the names in `DGLAB_NAMES`
-(`EXTRUSION_DG`, `BUBBLE_DG`, …) in whatever `coyote-sequences.js` you point it
-at. Getting the frame data is the part you have to do yourself:
+That build is for your own Flipper and must never be released (see
+**Licensing**). It installs as a separate app, "Coyote +DG", so it can sit
+alongside the normal one, and it keeps its own `settings-dg.bin` — its waveform
+masks set bits the 21-waveform build rejects, so a shared settings file would
+reset whichever build opened it second. The script regenerates the committed
+21-waveform table on its way out, so the working tree is never left carrying
+preset data.
+
+It expects the 24 sequences under the names in `DGLAB_NAMES` (`EXTRUSION_DG`,
+`BUBBLE_DG`, …) in whatever `coyote-sequences.js` the generator reads. Getting
+the frame data is the part you have to do yourself:
 
 1. **The easy 16.** DG-Lab publish 16 of the 24 themselves, with expected
    bytes, in
