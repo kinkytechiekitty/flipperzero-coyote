@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 KinkyTechieKitty
+#
+# Builds and runs the host-side tests. The .fap itself is not built here: that
+# needs a Blue++ firmware checkout and its ARM toolchain (see README).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Host tests
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic -Iapp \
+            tests/test_core.c app/coyote_app.c app/waveforms.c -o coyote-core-test
+          ./coyote-core-test
+
+      - name: No DG-Lab presets committed
+        # The same guard as .githooks/pre-commit, for anyone who has not enabled
+        # it. See README "Licensing".
+        run: |
+          count=$(grep -oE 'COYOTE_WAVEFORM_COUNT [0-9]+' app/waveforms_generated.h | awk '{print $2}')
+          if [ "$count" != "21" ]; then
+            echo "::error::waveform count is $count, expected 21" && exit 1
+          fi
+          if grep -q ' DG"' app/waveforms.c; then
+            echo "::error::DG-Lab preset names found in app/waveforms.c" && exit 1
+          fi
+
+      - name: Generated files are up to date
+        # waveforms.c is generated; a hand-edit here would be silently undone by
+        # the next run of the generator.
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          src = open("app/waveforms.c").read()
+          if "Generated" not in src.split("\n")[2]:
+              sys.exit("app/waveforms.c is missing its generated-by header")
+          names = re.findall(r'\{"([^"]+)", wf_', src)
+          if len(names) != 21:
+              sys.exit(f"{len(names)} waveform table entries, expected 21")
+          print(f"{len(names)} waveforms: {', '.join(names[:3])}, ...")
+          PY

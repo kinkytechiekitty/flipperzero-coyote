@@ -32,6 +32,11 @@ explicitly; prefer failing closed (output zero).
 
 ## Commands
 
+CI (`.github/workflows/ci.yml`) runs the host tests on every push and PR, and
+fails the build if the waveform count is not 21 or any `*_DG` name appears in
+`app/waveforms.c` — the same guard as the pre-commit hook, for contributors who
+have not enabled it.
+
 ```sh
 # Host tests — no hardware, no firmware checkout needed. Run these.
 cc -std=c11 -Wall -Wextra -Werror -pedantic -Iapp \
