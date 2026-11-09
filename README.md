@@ -1,5 +1,7 @@
 # Flipper Coyote
 
+[![CI](https://github.com/KinkyTechieKitty/flipper-coyote/actions/workflows/ci.yml/badge.svg)](https://github.com/KinkyTechieKitty/flipper-coyote/actions/workflows/ci.yml)
+
 A Flipper Zero app that drives a **DG-Lab Coyote v2** electrostim unit directly
 over Bluetooth LE — no phone, no computer, no server. Two channels, 21
 waveforms, a Normal mode and a hold-to-fire mode.
