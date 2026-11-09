@@ -3,22 +3,20 @@
 [![CI](https://github.com/KinkyTechieKitty/flipperzero-coyote/actions/workflows/ci.yml/badge.svg)](https://github.com/KinkyTechieKitty/flipperzero-coyote/actions/workflows/ci.yml)
 
 A Flipper Zero app that drives a **DG-Lab Coyote v2** electrostim unit directly
-over Bluetooth LE — no phone, no computer, no server. Two channels, 21
-waveforms, a Normal mode and a hold-to-fire mode.
+over Bluetooth LE — no phone, no computer, no server. Includes a Normal mode and
+a hold-to-fire mode and 21 waveforms that I made semi-randomly.
 
-> **Status: working, tested on hardware** — one Flipper Zero and one Coyote v2,
-> by me. That includes the case that matters most: walking out of Bluetooth
-> range mid-output stops the device. This is adult hardware-control software, so
-> still **start at low power and try it on yourself first**; read **Safety**
-> below.
+> **Status: working, tested on hardware** — one Flipper Zero and one Coyote v2.
+> This is adult hardware-control software, so **start at low power and try it on yourself first**;
+> read **Safety** below.
 
 ## What you need
 
 - A **Flipper Zero** running [Flipper Blue++](https://github.com/andydixon/flipper-bluepp)
   firmware. Stock firmware cannot act as a BLE central, so the app cannot work
-  on it — this is the one unavoidable hurdle.
+  on it.
 - A **DG-Lab Coyote v2**. The v3 speaks a different protocol and is not
-  supported.
+  supported yet.
 
 ## Install
 
@@ -29,8 +27,10 @@ waveforms, a Normal mode and a hold-to-fire mode.
    firmware restores the stock one.
 2. **Copy `coyote.fap`** (from this repo's
    [Releases](../../releases), or build it yourself below) to the SD card under
-   `apps/Bluetooth/`. Launch it from Apps → Bluetooth → Flipper Coyote.
-3. Switch the Coyote on. The app scans at launch and connects on its own.
+   `apps/Bluetooth/`.
+3. Turn on your DG-Lab Coyote v2.
+4. Launch the Coyote app from Apps → Bluetooth → Flipper Coyote.  The app should
+   automatically scan for and then connect to the Coyote.
 
 Notes:
 
@@ -39,52 +39,59 @@ Notes:
   mismatch"), your firmware exports a different symbol set — rebuild from
   source against your own Blue++ checkout.
 - Settings live at `/ext/apps_data/coyote/settings.bin`. Delete that file to
-  reset. Power levels are never saved: every launch starts at zero.
+  reset.
 - While the app runs, the Flipper's own Bluetooth advertising stops (so any
   phone link drops) and is restored on exit.
-- **It connects to the first device advertising as "D-LAB".** If somebody
-  else's Coyote is in range, it may grab theirs. A device picker is specified
-  but not built — see SPEC.md "Choosing a Coyote". Don't use this in a room
-  with more than one Coyote in it.
+- **Safety Note: The app connects to the first device advertising as "D-LAB".**
+  There currently isn't a way to force it to connect to a specific Coyote.  This
+  means if multiple Coyote are within range and not paired with a a controlling
+  device (phone app, etc), it will grab a random one.  There are plans to build
+  out a way to select which Coyote to connect to, but that functionality doesn't
+  exist yet.
 
 ## Using it
 
 Main menu: **Normal** / **Fire** / **Settings**, with the Coyote's name and
-battery on the status line. Back from the menu exits (output zeroed first).
+battery on the status line. Back button from the menu exits and disconnects
+the Coyote.
 
 Both modes show one big number per channel, the selected channel's waveform
 underneath, and arrows only where a change is possible.
 
-| Button | Tap | Hold |
+| Button | Tap | Hold/Long press |
 |---|---|---|
-| ◀ ▶ | select A → B → Both → Options | previous / next enabled waveform |
+| ◀ ▶ | Select Channel: A → B → Both → Options | Select Waveform: previous / next enabled waveform |
 | ▲ ▼ | power ± step | ramp up / down |
-| OK | Normal: mute / unmute. Fire: — | Normal: waveform list. Fire: **output while held** |
-| Back | all channels to 0, back to the menu | |
+| OK | Normal mode: mute / unmute. Fire mode: **shock while held** | Normal: waveform list. Fire: **shock while held** |
+| Back | Resets all channels to 0, returns to the main menu | |
 
 In Fire mode the number is the shock power and output is zero unless OK is
 held; each press restarts the waveform from its first frame. Selecting
-**Options** (the fourth stop in the ◀ ▶ cycle) and pressing OK opens that
-mode's waveform set, auto-advance dwell and shuffle.
+**Options** (the fourth stop in the ◀ ▶ cycle) and pressing OK opens Fire
+mode's waveform set, auto-advance dwell, and shuffle.
 
-Settings → **Normal mode…** / **Fire mode…** (per-mode waveforms, auto-advance,
-shuffle), **Channels…** (Max Power A/B, 5–292, default 85; power step 1–10),
-**Device…** (vibration, channel-change buzz). Power units are the host
-library's: the device's raw 11-bit power is `7 ×` the number shown, so 292 is
+Settings →
+   **Normal mode…** / **Fire mode…** (per-mode waveforms, auto-advance,
+shuffle),
+   **Channels…** (Max Power A/B, 5–292, default 85; power step 1–10),
+   **Device…** (vibration, channel-change buzz).
+
+Power units are the host library's: the device's raw 11-bit power is `7 ×` the number shown, so 292 is
 the hardware ceiling.
 
 ## Safety
 
-- Set **Max Power** before you play, not during. The cap is enforced on every
-  change and nothing can exceed it.
-- **Never place pads so current crosses the chest or the heart.** Below the
-  waist only.
+- **Max Power** sets the upper limit of how high channels can go.
 - Levels reset to 0 at launch, on every return to the menu and on reconnect;
   Back always zeroes output before leaving a mode.
-- Each pattern write covers only 100 ms of output, so a dropped link leaves the
-  device silent within a tick. **Tested:** walking out of range mid-output stops
-  it. Worth confirming once on your own pair anyway, at a low level, before you
-  trust it with anyone else.
+- If the Coyote goes out of range from the FlipperZero and loses connection,
+  all output stops immediately.  I think this is how the Coyote app works.
+
+### Standard estim safety warnings apply!
+- **Keep estim contact points below the waist**
+- **Don't play with this if your bottom/subject has a pacemaker or any other electrical health related device**
+- Kink is generally an inherently dangerous thing to do, estim even more so.
+  Do your research, learn what you're doing.  You can't have fun if you're dead or you burn your nerves off.
 
 ## Build from source
 

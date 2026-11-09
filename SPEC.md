@@ -1,4 +1,6 @@
-# Flipper Coyote — spec
+# Flipper Coyote — original spec
+
+_Note: This was initially written to feed into Claude to build this project.  Some things have changed since then, but I'm keeping this around for reference_
 
 A Flipper Zero app (`.fap`) that drives a DG-Lab Coyote v2 directly over BLE: no phone, computer or server. Runs on the Blue++ firmware build in `~/flipper-bluepp` (official 1.4.3 + ST's full BLE stack, built with `EXPORT_FLASH=0 BLE_API=hci,gap,gatt`), which lets apps act as a BLE central.
 

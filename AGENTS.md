@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Guidance for coding agents (Claude Code, Codex and friends) working in this
-repository. Humans want [README.md](./README.md); the design and device
+repository. Humans want [README.md](./README.md); the original design and device
 behaviour are in [SPEC.md](./SPEC.md).
 
 ## What this is
