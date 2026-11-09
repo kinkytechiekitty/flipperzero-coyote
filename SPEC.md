@@ -173,7 +173,7 @@ NORMAL                Coyote 82%
 - Per-channel cap enforced on every change; nothing can exceed it.
 - Every launch, every return to the menu and every reconnect starts at 0.
 - Back always zeroes all channels before leaving a mode.
-- If the app crashes or the link drops, the v2 should stop on its own because each pattern write covers only 100 ms of output. **Verify on the bench before the event.**
+- If the app crashes or the link drops, the v2 stops on its own because each pattern write covers only 100 ms of output. **Confirmed on hardware**, by walking out of Bluetooth range mid-output.
 
 ## Two Coyotes later
 

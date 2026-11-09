@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 KinkyTechieKitty
 #pragma once
 
 #if defined(__has_include)

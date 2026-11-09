@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 KinkyTechieKitty
 // Generated from feeder-2.0/server/lib/coyote-sequences.js by tools/gen_waveforms.py.
 // Do not edit by hand.
 #include "waveforms.h"
