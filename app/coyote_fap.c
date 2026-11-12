@@ -508,7 +508,7 @@ static void draw_mode(Canvas* canvas, const CoyoteModel* model, bool fire) {
     canvas_set_font(canvas, FontPrimary);
     if(!model->connected) {
         draw_centered(canvas, 8, "DISCONNECTED");
-    } else if(fire && model->fire_pressed) {
+    } else if(fire && model->fire_pressed && !options_card) {
         draw_centered(canvas, 8, "ZAP");
     } else {
         draw_centered(canvas, 8, fire ? "FIRE" : "NORMAL");
@@ -714,19 +714,28 @@ static void select_waveform(CoyoteModel* model, int direction) {
     model->pattern_restart = true;
 }
 
-static void leave_mode(CoyoteModel* model) {
-    coyote_set_channels_off(&model->runtime);
+// Drop every "key is still down" flag. Flipper delivers Release to whatever
+// page and selection is current when the key comes up, so any mid-hold page
+// change has to fail closed here rather than wait for a release that the new
+// page will not act on.
+static void clear_held_inputs(CoyoteModel* model) {
     model->fire_pressed = false;
     model->fire_press_pending = false;
-    model->fire_minimum_tick = false;
     model->held_power_direction = 0;
     model->ramp_elapsed_ms = 0;
+}
+
+static void leave_mode(CoyoteModel* model) {
+    coyote_set_channels_off(&model->runtime);
+    clear_held_inputs(model);
+    model->fire_minimum_tick = false;
     model->unmute_pending[0] = false;
     model->unmute_pending[1] = false;
     model->page = PageMain;
 }
 
 static void open_waveforms(CoyoteModel* model, bool fire) {
+    clear_held_inputs(model);
     model->waveform_parent = model->page;
     model->page = fire ? PageFireWaveforms : PageNormalWaveforms;
     model->wave_selection = 0;
@@ -808,12 +817,30 @@ static bool input_callback(InputEvent* event, void* context) {
         return true;
     }
 
+    // Fire and the power ramp both run off a held key, and a release is only
+    // ever delivered once — to whatever page and selection is current by then.
+    // Handle it before any page- or selection-specific branch so that a page or
+    // selection change during the hold cannot swallow it and leave output or
+    // the ramp running with nothing held.
+    if(event->type == InputTypeRelease &&
+       (event->key == InputKeyOk || event->key == InputKeyUp || event->key == InputKeyDown)) {
+        if(event->key == InputKeyOk) {
+            model->fire_pressed = false;
+        } else {
+            model->held_power_direction = 0;
+            model->ramp_elapsed_ms = 0;
+        }
+        model_unlock(app, true);
+        return true;
+    }
+
     if(model->page == PageNormal || model->page == PageFire) {
         const bool fire = model->page == PageFire;
         if(event->key == InputKeyOk && model->runtime.selection == COYOTE_CHANNEL_OPTIONS) {
             // Takes priority over both mute and fire, so the gesture is the same
             // in either mode and Back still means "leave the mode".
             if(event->type == InputTypeShort) {
+                clear_held_inputs(model);
                 model->options_parent = model->page;
                 model->options_return = model->page;
                 model->page = PageModeOptions;
@@ -828,9 +855,7 @@ static bool input_callback(InputEvent* event, void* context) {
                 if(model->runtime.selection != COYOTE_CHANNEL_A)
                     model->frame[1][1] = 0;
                 model->pattern_restart = true;
-            } else if(event->type == InputTypeRelease) {
-                model->fire_pressed = false;
-            }
+            } // Release is handled above, for every page.
         } else if(event->key == InputKeyOk && !fire && event->type == InputTypeShort) {
             set_selected_mute(model);
             queue_buzz(model, 1);
@@ -865,11 +890,7 @@ static bool input_callback(InputEvent* event, void* context) {
                   event->type == InputTypeLong) {
             model->held_power_direction = event->key == InputKeyUp ? 1 : -1;
             model->ramp_elapsed_ms = 0;
-        } else if((event->key == InputKeyUp || event->key == InputKeyDown) &&
-                  event->type == InputTypeRelease) {
-            model->held_power_direction = 0;
-            model->ramp_elapsed_ms = 0;
-        }
+        } // Up/Down Release is handled above, for every page.
     } else if(event->type == InputTypeShort) {
         if(model->page == PageMain) {
             if(event->key == InputKeyUp)
@@ -1256,7 +1277,10 @@ static bool transmit_tick(CoyoteApp* app, const CoyoteHandles* handles, uint32_t
         model->fire_press_pending = false;
         model->fire_minimum_tick = true;
     }
+    // The Options card is not a channel: fire never drives output while it is
+    // selected, even if OK went down before the selection moved onto it.
     fire_held = model->page == PageFire &&
+                model->runtime.selection != COYOTE_CHANNEL_OPTIONS &&
                 (model->fire_pressed || model->fire_minimum_tick);
     // Fire only drives the selected channel(s) while held; otherwise the resting
     // levels flow whenever normal output is live, which includes its options and
