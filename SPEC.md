@@ -9,7 +9,7 @@ Built for a dark play space: state readable at a glance, feedback you can feel w
 ## Scope
 
 - One Coyote v2 now. Data structures and settings are laid out for two (see **Two Coyotes later**).
-- Coyote v3 is out of scope (different protocol; `lib/coyote3.js` in Feeder).
+- Coyote v3 was out of scope when this was written; it is now supported. See **Coyote v3** at the end.
 
 ## Screens
 
@@ -196,3 +196,16 @@ What would still be needed:
 ## Open questions
 
 1. Fire defaults (Stutter, Low buzz, Fast taps, Hit / pulse, and the nine official presets marked above): confirm or change after trying them on the device.
+
+
+## Coyote v3
+
+Added after this spec was written; the rest of the document still describes a v2. The code is the reference:
+
+- Wire format: `app/coyote3_proto.h` (B0 output packet every 100 ms, BF soft limits, 16-bit UUIDs 0x180C / 0x150A / 0x150B, battery 0x180A / 0x1500).
+- Mapping from this app's levels and v2 frames: the `coyote3_*` helpers in `app/coyote_app.c`. Levels are 1:1 with v3 strength, capped at 200; frames convert by the official app's rule.
+- Rules for anyone changing it: `AGENTS.md`, "Coyote v3 rules".
+- What a user needs to know: `README.md`, "Coyote v3 notes".
+- What is still unconfirmed on hardware: `TODO.md`.
+
+Device choice is still automatic: the strongest signal among v2 and v3 candidates. **Choosing a Coyote** above remains the design for the picker.

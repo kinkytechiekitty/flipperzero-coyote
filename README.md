@@ -2,11 +2,14 @@
 
 [![CI](https://github.com/kinkytechiekitty/flipperzero-coyote/actions/workflows/ci.yml/badge.svg)](https://github.com/kinkytechiekitty/flipperzero-coyote/actions/workflows/ci.yml)
 
-A Flipper Zero app that drives a **DG-Lab Coyote v2** electrostim unit directly
+A Flipper Zero app that drives a **DG-Lab Coyote v2 or v3** electrostim unit directly
 over Bluetooth LE — no phone, no computer, no server. Includes a Normal mode and
 a hold-to-fire mode and 21 waveforms that I made semi-randomly.
 
 > **Status: working, tested on hardware** — one Flipper Zero and one Coyote v2.
+> **Coyote v3 support is new**: basic use has been tried on a v3 and works, but
+> the checklist in `TODO.md` (link loss in particular) is not finished, so read
+> the v3 notes under **Safety** before using it.
 > This is adult hardware-control software, so **start at low power and try it on yourself first**;
 > read **Safety** below.
 
@@ -15,8 +18,10 @@ a hold-to-fire mode and 21 waveforms that I made semi-randomly.
 - A **Flipper Zero** running [Flipper Blue++](https://github.com/andydixon/flipper-bluepp)
   firmware. Stock firmware cannot act as a BLE central, so the app cannot work
   on it.
-- A **DG-Lab Coyote v2**. The v3 speaks a different protocol and is not
-  supported yet.
+- A **DG-Lab Coyote v2** (advertises as `D-LAB…`) or **Coyote v3** (advertises
+  as `47L121000`). The two speak different protocols; the app works out which
+  one it has after connecting and shows `v2` or `v3` beside the device name.
+  v3 support has had only light hardware testing so far.
 
 ## Install
 
@@ -28,7 +33,7 @@ a hold-to-fire mode and 21 waveforms that I made semi-randomly.
 2. **Copy `coyote.fap`** (from this repo's
    [Releases](../../releases), or build it yourself below) to the SD card under
    `apps/Bluetooth/`.
-3. Turn on your DG-Lab Coyote v2.
+3. Turn on your DG-Lab Coyote.
 4. Launch the Coyote app from Apps → Bluetooth → Flipper Coyote.  The app should
    automatically scan for and then connect to the Coyote.
 
@@ -42,12 +47,13 @@ Notes:
   reset.
 - While the app runs, the Flipper's own Bluetooth advertising stops (so any
   phone link drops) and is restored on exit.
-- **Safety Note: The app connects to the first device advertising as "D-LAB".**
-  There currently isn't a way to force it to connect to a specific Coyote.  This
-  means if multiple Coyote are within range and not paired with a a controlling
-  device (phone app, etc), it will grab a random one.  There are plans to build
-  out a way to select which Coyote to connect to, but that functionality doesn't
-  exist yet.
+- **Safety Note: The app connects to the Coyote with the strongest signal.**
+  It looks for v2 (`D-LAB…`) and v3 (`47L121000`) units, waits a second after
+  the first one shows up, then connects to whichever is loudest — normally the
+  nearest. There currently isn't a way to force it to connect to a specific
+  Coyote, so with several in range and not already paired with a controlling
+  device (phone app, etc) it can still pick one that isn't yours. A way to
+  choose is planned (see [TODO.md](./TODO.md)) but doesn't exist yet.
 
 ## Using it
 
@@ -76,8 +82,11 @@ shuffle),
    **Channels…** (Max Power A/B, 5–292, default 85; power step 1–10),
    **Device…** (vibration, channel-change buzz).
 
-Power units are the host library's: the device's raw 11-bit power is `7 ×` the number shown, so 292 is
-the hardware ceiling.
+Power numbers are the same ones the official DG-Lab apps show. On a v2 the
+device's raw 11-bit power is `7 ×` the number shown, so 292 is the hardware
+ceiling. A v3 takes the number as its strength directly and tops out at **200**:
+on a v3 a Max Power above 200 acts as 200, and levels stop there. Whether the
+same number *feels* the same on a v2 and a v3 has not been checked — start low.
 
 ## Safety
 
@@ -86,6 +95,24 @@ the hardware ceiling.
   Back always zeroes output before leaving a mode.
 - If the Coyote goes out of range from the FlipperZero and loses connection,
   all output stops immediately.  I think this is how the Coyote app works.
+  **This is confirmed on a v2 only** — see below for the v3.
+
+### Coyote v3 notes
+
+- **Soft limit.** On connecting to a v3 the app sets the device's own strength
+  limit to your Max Power (per channel, 200 at most) before any output, so the
+  wheels on the unit cannot take it higher. The v3 stores that limit across
+  power cycles and the app **leaves it there on exit**. The official app sets
+  its own limit the next time it connects; other tools may not, and will then
+  inherit the lower one.
+- **Link loss is not yet confirmed.** Each packet carries 100 ms of output, so
+  output should stop when the Flipper goes away, but how a v3 actually behaves
+  when the link drops has not been measured. Do not rely on it.
+- **Some waveforms feel weaker.** A v3 has no direct equivalent of the v2's
+  pulse trains, so five waveforms built on long ones — Custom B, C, D, I and J —
+  come out weaker on a v3.
+- **Pulse width clips.** Widths above `z` 20 (the "stings more" range on a v2)
+  all become the v3's maximum intensity, so those waveforms lose that edge.
 
 ### Standard estim safety warnings apply!
 - **Keep estim contact points below the waist**

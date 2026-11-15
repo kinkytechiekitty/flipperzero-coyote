@@ -206,3 +206,64 @@ void coyote_power_packet(const uint16_t levels[COYOTE_CHANNEL_COUNT], uint8_t ou
 
     coyote_encode_power(levels[0], levels[1], out);
 }
+
+uint8_t coyote3_strength(uint16_t level) {
+    return level > COYOTE3_STRENGTH_MAX ? (uint8_t)COYOTE3_STRENGTH_MAX : (uint8_t)level;
+}
+
+void coyote3_convert_frame(const CoyoteFrame* frame, uint8_t* freq, uint8_t* intensity) {
+    if(frame == NULL || freq == NULL || intensity == NULL) {
+        return;
+    }
+
+    *freq = coyote3_freq_from_period((uint16_t)(frame->x + frame->y));
+    if(frame->x == 0u || frame->z == 0u) {
+        *intensity = 0u;
+    } else {
+        const uint16_t scaled = (uint16_t)(frame->z * 5u);
+        *intensity = scaled > 100u ? 100u : (uint8_t)scaled;
+    }
+}
+
+void coyote3_output_packet(
+    uint16_t level_a,
+    uint16_t level_b,
+    const CoyoteFrame* frame_a,
+    const CoyoteFrame* frame_b,
+    uint8_t out[COYOTE3_B0_LEN]) {
+    if(out == NULL) {
+        return;
+    }
+
+    const uint8_t strength[COYOTE_CHANNEL_COUNT] = {
+        coyote3_strength(level_a), coyote3_strength(level_b)};
+    const CoyoteFrame* frames[COYOTE_CHANNEL_COUNT] = {frame_a, frame_b};
+    uint8_t freq[COYOTE_CHANNEL_COUNT][4];
+    uint8_t intensity[COYOTE_CHANNEL_COUNT][4];
+
+    for(size_t channel = 0; channel < COYOTE_CHANNEL_COUNT; ++channel) {
+        // Fail closed: a legal frequency with nothing on it.
+        uint8_t f = coyote3_freq_from_period(0);
+        uint8_t i = 0u;
+        if(frames[channel] != NULL) coyote3_convert_frame(frames[channel], &f, &i);
+        if(strength[channel] == 0u) i = 0u;
+        for(size_t slice = 0; slice < 4u; ++slice) {
+            freq[channel][slice] = f;
+            intensity[channel][slice] = i;
+        }
+    }
+
+    coyote3_encode_b0(
+        0u, COYOTE3_MODE_ABSOLUTE, COYOTE3_MODE_ABSOLUTE, strength[0], strength[1],
+        freq[0], intensity[0], freq[1], intensity[1], out);
+}
+
+void coyote3_limits_packet(const CoyoteSettings* settings, uint8_t out[COYOTE3_BF_LEN]) {
+    if(settings == NULL || out == NULL) {
+        return;
+    }
+
+    coyote3_encode_bf(
+        coyote3_strength(settings->caps[0]), coyote3_strength(settings->caps[1]),
+        160u, 160u, 0u, 0u, out);
+}

@@ -85,6 +85,7 @@ typedef struct {
     uint16_t ramp_elapsed_ms;
     bool fire_pressed;
     bool connected;
+    CoyoteDeviceKind device_kind; // meaningful while connected; for drawing
     uint8_t battery;
     bool battery_valid;
     char device_name[BC_NAME_MAX + 1];
@@ -105,6 +106,13 @@ typedef struct {
     volatile uint16_t battery_handle;
     uint8_t last_power[3];
     bool last_power_valid;
+    // Coyote v3 only. The notify handle is read by the BLE callback; the rest
+    // is worker-only: the strengths in the last B0 that went out and the soft
+    // limits in the last BF.
+    volatile uint16_t v3_notify_handle;
+    uint8_t v3_last_strength[COYOTE_CHANNEL_COUNT];
+    bool v3_last_strength_valid;
+    uint8_t v3_last_limits[COYOTE_CHANNEL_COUNT];
     bool was_advertising;
     bool last_fire_held; // worker-only; drives the redraw-on-change below
 } CoyoteApp;
@@ -328,7 +336,16 @@ static void draw_menu(Canvas* canvas, const CoyoteModel* model) {
         count = 3;
         first_baseline = 32;
         canvas_set_font(canvas, FontPrimary);
-        draw_centered(canvas, 9, model->connected ? model->device_name : "Not connected");
+        if(model->connected) {
+            // Name plus the protocol discovery settled on. BC_NAME_MAX + " v3".
+            char title[BC_NAME_MAX + 4];
+            snprintf(
+                title, sizeof(title), "%s %s", model->device_name,
+                model->device_kind == COYOTE_KIND_V3 ? "v3" : "v2");
+            draw_centered(canvas, 9, title);
+        } else {
+            draw_centered(canvas, 9, "Not connected");
+        }
         canvas_set_font(canvas, FontSecondary);
         if(model->settings_warning) {
             // Shown here rather than on the Settings page, whose six rows fill
@@ -1065,6 +1082,26 @@ static bool char_uuid_equal(const BcChar* chr, const uint8_t uuid[16]) {
     return chr->uuid_len == 16u && memcmp(chr->uuid, uuid, 16) == 0;
 }
 
+// Coyote v3 uses 16-bit UUIDs. Blue++'s ble_central copies the UUID out of the
+// ATT response as it came off the air: 2 bytes little-endian, or 16 bytes
+// little-endian (the same order as the uuid_* arrays below) should the stack
+// ever hand back the expanded form.
+static bool uuid_is_16bit(uint8_t uuid_len, const uint8_t* uuid, uint16_t short_uuid) {
+    static const uint8_t base[12] = {
+        0xFB, 0x34, 0x9B, 0x5F, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00};
+    const uint8_t low = (uint8_t)short_uuid;
+    const uint8_t high = (uint8_t)(short_uuid >> 8);
+    if(uuid_len == 2u) return uuid[0] == low && uuid[1] == high;
+    return uuid_len == 16u && memcmp(uuid, base, sizeof(base)) == 0 && uuid[12] == low &&
+           uuid[13] == high && uuid[14] == 0u && uuid[15] == 0u;
+}
+
+#define UUID_V3_SERVICE 0x180Cu
+#define UUID_V3_WRITE 0x150Au
+#define UUID_V3_NOTIFY 0x150Bu
+#define UUID_V3_BATTERY_SERVICE 0x180Au
+#define UUID_V3_BATTERY 0x1500u
+
 static const uint8_t uuid_coyote_service[16] = {
     0xAD, 0xE8, 0xF3, 0xD4, 0xB8, 0x84, 0x94, 0xA0,
     0xAA, 0xF5, 0xE2, 0x0F, 0x0B, 0x18, 0x5A, 0x95};
@@ -1090,6 +1127,13 @@ static void battery_notification(
     uint8_t length,
     void* context) {
     CoyoteApp* app = context;
+    if(app->v3_notify_handle != 0u && value_handle == app->v3_notify_handle) {
+        // Coyote v3 B1: the strengths the device says it is at. Logged only.
+        // Nothing may ever act on this: output is decided by the app alone.
+        if(length >= 4u && data[0] == 0xB1u)
+            FURI_LOG_D(TAG, "B1 seq %u A %u B %u", data[1], data[2], data[3]);
+        return;
+    }
     if(value_handle != app->battery_handle || length == 0u || data[0] > 100u) return;
     CoyoteModel* model = model_lock(app);
     model->battery = data[0];
@@ -1102,6 +1146,9 @@ typedef struct {
     uint16_t pattern_a;
     uint16_t pattern_b;
     uint16_t battery;
+    CoyoteDeviceKind kind;
+    uint16_t v3_write;
+    uint16_t v3_notify;
 } CoyoteHandles;
 
 static bool discover_device(CoyoteApp* app, CoyoteHandles* handles, uint8_t* battery) {
@@ -1124,19 +1171,54 @@ static bool discover_device(CoyoteApp* app, CoyoteHandles* handles, uint8_t* bat
         if(uuid_equal(&services[i], uuid_coyote_service)) coyote = &services[i];
         if(uuid_equal(&services[i], uuid_battery_service)) battery_service = &services[i];
     }
-    if(!coyote) goto done;
-
-    const int char_count = bc_discover_chars(app->ble, coyote, chars, BC_MAX_CHARS);
-    if(char_count < 0) goto done;
     memset(handles, 0, sizeof(*handles));
-    for(int i = 0; i < char_count; ++i) {
-        if(char_uuid_equal(&chars[i], uuid_power)) handles->power = chars[i].value_handle;
-        else if(char_uuid_equal(&chars[i], uuid_pattern_a))
-            handles->pattern_a = chars[i].value_handle;
-        else if(char_uuid_equal(&chars[i], uuid_pattern_b))
-            handles->pattern_b = chars[i].value_handle;
+    if(coyote) {
+        handles->kind = COYOTE_KIND_V2;
+        const int char_count = bc_discover_chars(app->ble, coyote, chars, BC_MAX_CHARS);
+        if(char_count < 0) goto done;
+        for(int i = 0; i < char_count; ++i) {
+            if(char_uuid_equal(&chars[i], uuid_power)) handles->power = chars[i].value_handle;
+            else if(char_uuid_equal(&chars[i], uuid_pattern_a))
+                handles->pattern_a = chars[i].value_handle;
+            else if(char_uuid_equal(&chars[i], uuid_pattern_b))
+                handles->pattern_b = chars[i].value_handle;
+        }
+        if(!handles->power || !handles->pattern_a || !handles->pattern_b) goto done;
+    } else {
+        // No v2 service: this is a v3 or nothing we can drive.
+        const BcService* v3 = NULL;
+        battery_service = NULL;
+        for(int i = 0; i < service_count; ++i) {
+            if(uuid_is_16bit(services[i].uuid_len, services[i].uuid, UUID_V3_SERVICE))
+                v3 = &services[i];
+            if(uuid_is_16bit(services[i].uuid_len, services[i].uuid, UUID_V3_BATTERY_SERVICE))
+                battery_service = &services[i];
+        }
+        if(!v3) goto done;
+        handles->kind = COYOTE_KIND_V3;
+        const int char_count = bc_discover_chars(app->ble, v3, chars, BC_MAX_CHARS);
+        if(char_count < 0) goto done;
+        BcChar notify_characteristic = {0};
+        for(int i = 0; i < char_count; ++i) {
+            if(uuid_is_16bit(chars[i].uuid_len, chars[i].uuid, UUID_V3_WRITE)) {
+                handles->v3_write = chars[i].value_handle;
+            } else if(uuid_is_16bit(chars[i].uuid_len, chars[i].uuid, UUID_V3_NOTIFY)) {
+                notify_characteristic = chars[i];
+                handles->v3_notify = chars[i].value_handle;
+            }
+        }
+        if(!handles->v3_write || !handles->v3_notify) goto done;
+        // B1 is only ever logged, so failing to subscribe is not fatal.
+        uint16_t end_handle = v3->end;
+        for(int i = 0; i < char_count; ++i) {
+            if(chars[i].decl_handle > notify_characteristic.decl_handle &&
+               chars[i].decl_handle - 1u < end_handle)
+                end_handle = chars[i].decl_handle - 1u;
+        }
+        app->v3_notify_handle = handles->v3_notify;
+        if(!bc_set_notify(app->ble, &notify_characteristic, end_handle, true))
+            FURI_LOG_W(TAG, "Coyote v3 strength notifications unavailable");
     }
-    if(!handles->power || !handles->pattern_a || !handles->pattern_b) goto done;
 
     if(battery_service) {
         const int battery_char_count =
@@ -1144,7 +1226,9 @@ static bool discover_device(CoyoteApp* app, CoyoteHandles* handles, uint8_t* bat
         BcChar battery_characteristic = {0};
         if(battery_char_count > 0) {
             for(int i = 0; i < battery_char_count; ++i) {
-                if(char_uuid_equal(&chars[i], uuid_battery)) {
+                if(handles->kind == COYOTE_KIND_V3 ?
+                       uuid_is_16bit(chars[i].uuid_len, chars[i].uuid, UUID_V3_BATTERY) :
+                       char_uuid_equal(&chars[i], uuid_battery)) {
                     battery_characteristic = chars[i];
                     handles->battery = battery_characteristic.value_handle;
                     break;
@@ -1178,11 +1262,27 @@ done:
     return found;
 }
 
+// The name only picks candidates; which protocol to speak comes from GATT
+// discovery. The v3 name is matched exactly: "47L121000_O" is its bootloader
+// and "47L120100" a different product.
 static bool is_coyote(const BcDevice* device) {
-    return strncmp(device->name, "D-LAB", 5) == 0;
+    return strncmp(device->name, "D-LAB", 5) == 0 || strcmp(device->name, "47L121000") == 0;
 }
 
 static void set_outputs_off(CoyoteApp* app, const CoyoteHandles* handles) {
+    if(handles->kind == COYOTE_KIND_V3) {
+        uint8_t packet[COYOTE3_B0_LEN];
+        coyote3_output_packet(0, 0, NULL, NULL, packet);
+        if(bc_write(app->ble, handles->v3_write, packet, sizeof(packet), false)) {
+            app->v3_last_strength[0] = 0;
+            app->v3_last_strength[1] = 0;
+            app->v3_last_strength_valid = true;
+        } else {
+            app->v3_last_strength_valid = false;
+            FURI_LOG_W(TAG, "Could not zero Coyote v3 output: 0x%02X", bc_last_error(app->ble));
+        }
+        return;
+    }
     uint8_t power[3];
     uint8_t zero[3] = {0, 0, 0};
     coyote_encode_power(0, 0, power);
@@ -1229,8 +1329,91 @@ static void fill_frame(const CoyoteModel* model, size_t channel, uint8_t out[3])
     coyote_encode_pattern(frame->x, frame->y, frame->z, out);
 }
 
+// The same frame fill_frame encodes, unencoded, for the v3 path.
+static CoyoteFrame current_frame(const CoyoteModel* model, size_t channel) {
+    const size_t mode = active_mode(model);
+    const CoyoteWaveform* waveform = &coyote_waveforms[model->waveform[mode][channel]];
+    return waveform->frames[model->frame[mode][channel] % waveform->count];
+}
+
+static bool send_v2(
+    CoyoteApp* app,
+    const CoyoteHandles* handles,
+    bool patterns_due,
+    const uint8_t power_packet[3],
+    const uint8_t pattern_a[3],
+    const uint8_t pattern_b[3]) {
+    if(patterns_due &&
+       (!bc_write(app->ble, handles->pattern_a, pattern_a, 3, false) ||
+        !bc_write(app->ble, handles->pattern_b, pattern_b, 3, false))) {
+        FURI_LOG_E(TAG, "Pattern write failed: 0x%02X", bc_last_error(app->ble));
+        return false;
+    }
+    if(!app->last_power_valid || memcmp(power_packet, app->last_power, 3) != 0) {
+        if(!bc_write(app->ble, handles->power, power_packet, 3, false)) {
+            FURI_LOG_E(TAG, "Power write failed: 0x%02X", bc_last_error(app->ble));
+            return false;
+        }
+        memcpy(app->last_power, power_packet, 3);
+        app->last_power_valid = true;
+    }
+    return true;
+}
+
+// Soft limits = the app's Max Power. Sent on connect and whenever a cap changes.
+static bool send_v3_limits(CoyoteApp* app, const CoyoteHandles* handles, const uint8_t* packet) {
+    if(!bc_write(app->ble, handles->v3_write, packet, COYOTE3_BF_LEN, false)) {
+        FURI_LOG_E(TAG, "Limit write failed: 0x%02X", bc_last_error(app->ble));
+        return false;
+    }
+    app->v3_last_limits[0] = packet[1];
+    app->v3_last_limits[1] = packet[2];
+    return true;
+}
+
+// One B0 carries strength and waveform together. It goes out on the 100 ms
+// boundary, and at once whenever a strength drops (fire release, mute, Back,
+// any decrease) so that stopping never waits for the next boundary. Increases
+// wait for the boundary.
+static bool send_v3(
+    CoyoteApp* app,
+    const CoyoteHandles* handles,
+    bool patterns_due,
+    uint16_t output_a,
+    uint16_t output_b,
+    const CoyoteFrame* frame_a,
+    const CoyoteFrame* frame_b,
+    const CoyoteSettings* settings) {
+    uint8_t limits[COYOTE3_BF_LEN];
+    coyote3_limits_packet(settings, limits);
+    if((limits[1] != app->v3_last_limits[0] || limits[2] != app->v3_last_limits[1]) &&
+       !send_v3_limits(app, handles, limits))
+        return false;
+
+    const uint8_t strength_a = coyote3_strength(output_a);
+    const uint8_t strength_b = coyote3_strength(output_b);
+    const bool lowered = !app->v3_last_strength_valid ||
+                         strength_a < app->v3_last_strength[0] ||
+                         strength_b < app->v3_last_strength[1];
+    if(!patterns_due && !lowered) return true;
+
+    uint8_t packet[COYOTE3_B0_LEN];
+    coyote3_output_packet(output_a, output_b, frame_a, frame_b, packet);
+    if(!bc_write(app->ble, handles->v3_write, packet, sizeof(packet), false)) {
+        app->v3_last_strength_valid = false;
+        FURI_LOG_E(TAG, "Output write failed: 0x%02X", bc_last_error(app->ble));
+        return false;
+    }
+    app->v3_last_strength[0] = strength_a;
+    app->v3_last_strength[1] = strength_b;
+    app->v3_last_strength_valid = true;
+    return true;
+}
+
 static bool transmit_tick(CoyoteApp* app, const CoyoteHandles* handles, uint32_t* elapsed) {
     uint8_t power_packet[3], pattern_a[3], pattern_b[3];
+    CoyoteFrame frame_a, frame_b;
+    CoyoteSettings settings;
     uint16_t output_a, output_b;
     bool normal_on, fire_on, fire_held, connected, patterns_due;
     bool vibrate;
@@ -1243,6 +1426,18 @@ static bool transmit_tick(CoyoteApp* app, const CoyoteHandles* handles, uint32_t
             model->ramp_elapsed_ms -= interval;
             step_selected_channels(model, model->held_power_direction);
             queue_buzz(model, 1);
+        }
+    }
+
+    // A v3 tops out at 200 whatever Max Power says. Clamp the stored levels,
+    // not just the packet, so the number on screen is the number it gets.
+    if(handles->kind == COYOTE_KIND_V3) {
+        const size_t v3_device = model->active_device_index;
+        for(size_t channel = 0; channel < COYOTE_CHANNEL_COUNT; ++channel) {
+            if(model->runtime.levels[v3_device][channel] > COYOTE3_STRENGTH_MAX)
+                model->runtime.levels[v3_device][channel] = COYOTE3_STRENGTH_MAX;
+            if(model->runtime.mute_levels[v3_device][channel] > COYOTE3_STRENGTH_MAX)
+                model->runtime.mute_levels[v3_device][channel] = COYOTE3_STRENGTH_MAX;
         }
     }
 
@@ -1298,6 +1493,9 @@ static bool transmit_tick(CoyoteApp* app, const CoyoteHandles* handles, uint32_t
     coyote_encode_power(output_a, output_b, power_packet);
     fill_frame(model, 0, pattern_a);
     fill_frame(model, 1, pattern_b);
+    frame_a = current_frame(model, 0);
+    frame_b = current_frame(model, 1);
+    settings = model->settings;
     // Auto-advance: the dwell runs on wall-clock time, but the switch waits for
     // the waveform to finish its cycle, so it never cuts off mid-pattern.
     const uint8_t dwell_s = model->settings.auto_advance_s[mode];
@@ -1355,19 +1553,12 @@ static bool transmit_tick(CoyoteApp* app, const CoyoteHandles* handles, uint32_t
     furi_hal_vibro_on(vibrate);
     if(!connected) return true;
 
-    if(patterns_due &&
-       (!bc_write(app->ble, handles->pattern_a, pattern_a, sizeof(pattern_a), false) ||
-        !bc_write(app->ble, handles->pattern_b, pattern_b, sizeof(pattern_b), false))) {
-        FURI_LOG_E(TAG, "Pattern write failed: 0x%02X", bc_last_error(app->ble));
-        return false;
-    }
-    if(!app->last_power_valid || memcmp(power_packet, app->last_power, sizeof(power_packet)) != 0) {
-        if(!bc_write(app->ble, handles->power, power_packet, sizeof(power_packet), false)) {
-            FURI_LOG_E(TAG, "Power write failed: 0x%02X", bc_last_error(app->ble));
+    if(handles->kind == COYOTE_KIND_V3) {
+        if(!send_v3(
+               app, handles, patterns_due, output_a, output_b, &frame_a, &frame_b, &settings))
             return false;
-        }
-        memcpy(app->last_power, power_packet, sizeof(power_packet));
-        app->last_power_valid = true;
+    } else if(!send_v2(app, handles, patterns_due, power_packet, pattern_a, pattern_b)) {
+        return false;
     }
     if(!bc_is_connected(app->ble)) {
         FURI_LOG_E(TAG, "Output write failed: 0x%02X", bc_last_error(app->ble));
@@ -1410,14 +1601,27 @@ static int32_t worker_thread(void* context) {
         }
         BcDevice target = {0};
         bool found = false;
-        while(!app->stopping && !found) {
+        bool chosen = false;
+        uint32_t first_candidate_tick = 0;
+        // With more than one Coyote in range the strongest signal wins: once a
+        // candidate shows up, keep sampling for a second so the others can
+        // advertise too, then take the best RSSI in the latest snapshot.
+        while(!app->stopping && !chosen) {
             const size_t count = bc_snapshot(app->ble, devices, BC_MAX_DEVICES);
+            bool any = false;
             for(size_t i = 0; i < count; ++i) {
-                if(is_coyote(&devices[i])) {
-                    target = devices[i];
-                    found = true;
-                    break;
-                }
+                if(!is_coyote(&devices[i])) continue;
+                if(!any || devices[i].rssi > target.rssi) target = devices[i];
+                any = true;
+            }
+            if(any && !found) {
+                found = true;
+                first_candidate_tick = furi_get_tick();
+            }
+            if(!any) found = false; // it went stale while we were waiting
+            if(found && furi_get_tick() - first_candidate_tick >= 1000u) {
+                chosen = true;
+                break;
             }
             set_light(false, false, false, furi_get_tick());
             // 100 ms, not 250: the disconnect blink toggles every 400 ms, and
@@ -1434,19 +1638,39 @@ static int32_t worker_thread(void* context) {
 
         uint8_t battery = 0xFF;
         app->battery_handle = 0;
+        app->v3_notify_handle = 0;
+        app->v3_last_strength_valid = false;
         if(!discover_device(app, &handles, &battery)) {
             FURI_LOG_E(TAG, "Coyote GATT service/characteristic discovery failed");
             bc_disconnect(app->ble);
             continue;
         }
 
-        CoyoteModel* model = model_lock(app);
+        CoyoteModel* model;
+        if(handles.kind == COYOTE_KIND_V3) {
+            // The soft limit goes in before anything that could produce output,
+            // and before the app shows as connected. BF has no response, so give
+            // the device time to take it, then send the zero packet.
+            uint8_t limits[COYOTE3_BF_LEN];
+            model = model_lock(app);
+            coyote3_limits_packet(&model->settings, limits);
+            model_unlock(app, false);
+            if(!send_v3_limits(app, &handles, limits)) {
+                bc_disconnect(app->ble);
+                continue;
+            }
+            furi_delay_ms(500);
+            set_outputs_off(app, &handles);
+        }
+
+        model = model_lock(app);
         coyote_runtime_reset(&model->runtime);
         model->fire_pressed = false;
         model->fire_press_pending = false;
         model->fire_minimum_tick = false;
         model->held_power_direction = 0;
         model->connected = true;
+        model->device_kind = handles.kind;
         model->battery = battery;
         model->battery_valid = battery <= 100u;
         snprintf(model->device_name, sizeof(model->device_name), "%s", target.name);

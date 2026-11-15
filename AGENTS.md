@@ -6,8 +6,8 @@ behaviour are in [SPEC.md](./SPEC.md).
 
 ## What this is
 
-A Flipper Zero external app (`.fap`) that drives a DG-Lab Coyote v2 electrostim
-unit over BLE as a central. It only builds and runs against
+A Flipper Zero external app (`.fap`) that drives a DG-Lab Coyote v2 or v3
+electrostim unit over BLE as a central. It only builds and runs against
 [Flipper Blue++](https://github.com/andydixon/flipper-bluepp) firmware, which
 swaps in ST's full BLE stack and exports the GAP/GATT command API to apps.
 
@@ -24,6 +24,7 @@ explicitly; prefer failing closed (output zero).
 | `app/coyote_fap.c` | Everything UI: pages, input handling, drawing, the 20 ms worker and 100 ms output tick, settings file I/O |
 | `app/coyote_app.c/.h` | Pure state: settings defaults and validation, waveform masks, level stepping, the power packet. No Flipper APIs — this is what the host tests exercise |
 | `app/coyote_proto.h` | Coyote v2 wire encoding, header-only |
+| `app/coyote3_proto.h` | Coyote v3 wire encoding (B0 output, BF limits), header-only, `<stdint.h>` only |
 | `app/waveforms.c`, `app/waveforms_generated.h` | **Generated.** Do not hand-edit; run `tools/gen_waveforms.py` |
 | — | `ble_central.c/.h` are **not** in this repo. Blue++'s build stages its own `libble/` copies into the app; don't vendor them back in |
 | `tests/test_core.c` | Host test for the state/packet helpers; silent + exit 0 on pass |
@@ -95,11 +96,32 @@ Blue++'s own `BLE_API=hci,gap,gatt ./build.sh fap` still works if you add
   launch, on return to the menu and on reconnect; Back zeroes before leaving a
   mode; Fire output starts on `InputTypePress` and stops on `InputTypeRelease`;
   each pattern write covers only 100 ms, so a dropped link stops output. These
-  are confirmed on hardware, out-of-range disconnect included — a change that
+  are confirmed on v2 hardware, out-of-range disconnect included (v3: same
+  invariants in code, basic use tried on hardware, link loss not yet measured) — a change that
   weakens any of them is a regression, not a refactor.
+- **Coyote v3 rules** (`coyote3_proto.h`, the `coyote3_*` helpers in
+  `coyote_app.c`, `send_v3` in `coyote_fap.c`). v3 has had only basic
+  hardware testing; [TODO.md](./TODO.md) has what is still open.
+  - **Absolute strength only.** Every B0 carries mode `11` for both channels
+    (byte 1 is always `0x0F`). Never send the relative modes: a repeated or
+    lost packet would ratchet.
+  - **Never act on B1.** The 0x150B notification is logged at debug level and
+    nothing else. Output is decided by the app alone.
+  - **BF before any output.** The soft limit (= Max Power, ceiling 200) is
+    written on connect before the app shows as connected, and again before the
+    B0 whenever a cap changes. It is deliberately not written on exit.
+  - **Exact name match.** `47L121000` only: `47L121000_O` is the bootloader and
+    `47L120100` another product. The name only selects candidates; the protocol
+    comes from GATT discovery (v2 service first, then 0x180C).
+  - **Never emit an out-of-range byte** (frequency 10–240, intensity 0–100,
+    strength 0–200): the device discards that channel's whole packet.
+    `coyote3_output_packet` is the only thing that builds the app's B0.
+  - Levels are 1:1 with v3 strength, clamped at 200 — no rescaling. v2 output
+    is pinned by a checksum in `tests/test_core.c`; if it moves, v2 changed.
 - **Not built yet, though specified:** the device picker and "Forget Coyote".
-  The app connects to the first device advertising as `D-LAB`
-  (`coyote_fap.c:1153`). SPEC.md "Choosing a Coyote" is the design.
+  The app connects to the strongest-signal device advertising as `D-LAB…` or
+  exactly `47L121000` (`is_coyote`, `coyote_fap.c:1268`, and the scan loop in
+  `worker_thread`). SPEC.md "Choosing a Coyote" is the design.
 - **SPEC.md has drifted** in places — it describes the 45-waveform set, a
   pre-64-bit-mask settings format and a power step range of 1–20 (the code is
   1–10), and predates the per-mode options pages, auto-advance, shuffle and the

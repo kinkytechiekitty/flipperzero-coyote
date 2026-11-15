@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "coyote_proto.h"
+#include "coyote3_proto.h"
 #include "waveforms.h"
 
 #define COYOTE_CHANNEL_COUNT 2u
@@ -32,6 +33,10 @@ typedef enum {
     COYOTE_CHANNEL_OPTIONS = 3,
 } CoyoteChannel;
 #define COYOTE_SELECTION_COUNT 4u
+
+// Which wire protocol the connected unit speaks. Decided by GATT discovery,
+// never by the advertised name.
+typedef enum { COYOTE_KIND_V2 = 0, COYOTE_KIND_V3 = 1 } CoyoteDeviceKind;
 
 typedef struct {
     // One set of caps, not one per device: pad placement does not survive
@@ -73,3 +78,22 @@ void coyote_set_channel_levels(CoyoteRuntime* runtime, size_t device, CoyoteChan
 void coyote_step_channels(CoyoteRuntime* runtime, size_t device, CoyoteChannel selection, int step, const CoyoteSettings* settings);
 void coyote_set_channels_off(CoyoteRuntime* runtime);
 void coyote_power_packet(const uint16_t levels[COYOTE_CHANNEL_COUNT], uint8_t out[3]);
+
+// Coyote v3. Levels are 1:1 with the v3's strength (the number the official
+// app shows), so the only conversion is the ceiling of 200.
+uint8_t coyote3_strength(uint16_t level);
+// One v2 frame as a v3 frequency/intensity pair, by the official app's rule:
+// period = x + y ms; intensity = z * 5 capped at 100, and 0 when the frame has
+// no pulses (x == 0) or no width (z == 0). Always yields a legal pair.
+void coyote3_convert_frame(const CoyoteFrame* frame, uint8_t* freq, uint8_t* intensity);
+// The 100 ms B0 packet. Always absolute strength for both channels, sequence 0;
+// each frame fills all four 25 ms slices. A channel at strength 0, or with a
+// NULL frame, carries zero intensity on a legal frequency.
+void coyote3_output_packet(
+    uint16_t level_a,
+    uint16_t level_b,
+    const CoyoteFrame* frame_a,
+    const CoyoteFrame* frame_b,
+    uint8_t out[COYOTE3_B0_LEN]);
+// BF: soft limits = the caps (ceiling 200), balances at the official 160/160/0/0.
+void coyote3_limits_packet(const CoyoteSettings* settings, uint8_t out[COYOTE3_BF_LEN]);
