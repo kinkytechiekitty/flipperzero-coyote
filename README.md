@@ -6,22 +6,14 @@ A Flipper Zero app that drives a **DG-Lab Coyote v2 or v3** electrostim unit dir
 over Bluetooth LE — no phone, no computer, no server. Includes a Normal mode and
 a hold-to-fire mode and 21 waveforms that I made semi-randomly.
 
-> **Status: working, tested on hardware** — one Flipper Zero and one Coyote v2.
-> **Coyote v3 support is new**: basic use has been tried on a v3 and works, but
-> the checklist in `TODO.md` (link loss in particular) is not finished, so read
-> the v3 notes under **Safety** before using it.
 > This is adult hardware-control software, so **start at low power and try it on yourself first**;
 > read **Safety** below.
 
 ## What you need
 
-- A **Flipper Zero** running [Flipper Blue++](https://github.com/andydixon/flipper-bluepp)
-  firmware. Stock firmware cannot act as a BLE central, so the app cannot work
-  on it.
+- A **Flipper Zero** running custom firmware [Flipper Blue++](https://github.com/andydixon/flipper-bluepp) firmware. Stock firmware cannot act as a BLE central, so the app will not work without the custom firmware.
 - A **DG-Lab Coyote v2** (advertises as `D-LAB…`) or **Coyote v3** (advertises
-  as `47L121000`). The two speak different protocols; the app works out which
-  one it has after connecting and shows `v2` or `v3` beside the device name.
-  v3 support has had only light hardware testing so far.
+  as `47L121000`)
 
 ## Install
 
@@ -93,7 +85,7 @@ same number *feels* the same on a v2 and a v3 has not been checked — start low
 - **Max Power** sets the upper limit of how high channels can go.
 - Levels reset to 0 at launch, on every return to the menu and on reconnect;
   Back always zeroes output before leaving a mode.
-- If the Coyote goes out of range from the FlipperZero and loses connection,
+- If the Coyote goes out of range from the Flipper Zero and loses connection,
   all output stops immediately.  I think this is how the Coyote app works.
   **This is confirmed on a v2 only** — see below for the v3.
 
